@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms.Integration;
@@ -56,6 +57,13 @@ namespace MultiBoardViewer
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+
+        // For disabling drag & drop on embedded windows
+        [DllImport("ole32.dll")]
+        private static extern int RevokeDragDrop(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
         private const uint GW_CHILD = 5;
         private const uint WM_SIZE = 0x0005;
@@ -205,8 +213,14 @@ namespace MultiBoardViewer
             catch { }
         }
 
-        // Search files in the configured folder
-        private List<string> SearchFiles(string searchText)
+        // Supported file extensions
+        private static readonly HashSet<string> SupportedExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".pdf", ".fz", ".brd", ".bom", ".cad", ".bdv", ".asc", ".bv", ".cst", ".gr", ".f2b", ".faz", ".tvw"
+        };
+
+        // Search files in the configured folder (async version)
+        private async System.Threading.Tasks.Task<List<string>> SearchFilesAsync(string searchText, CancellationToken cancellationToken)
         {
             var results = new List<string>();
             
@@ -218,23 +232,40 @@ namespace MultiBoardViewer
 
             try
             {
-                // Supported file extensions
-                string[] extensions = { ".pdf", ".fz", ".brd", ".bom", ".cad", ".bdv", ".asc", ".bv", ".cst", ".gr", ".f2b", ".faz", ".tvw" };
-                
-                // Search recursively
-                var files = Directory.EnumerateFiles(_searchFolder, "*", SearchOption.AllDirectories)
-                    .Where(f => 
+                await System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
                     {
-                        string fileName = Path.GetFileName(f);
-                        string ext = Path.GetExtension(f).ToLowerInvariant();
-                        return extensions.Contains(ext) && 
-                               fileName.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
-                    })
-                    .Take(50) // Limit results
-                    .ToList();
-                
-                results.AddRange(files);
+                        var files = Directory.EnumerateFiles(_searchFolder, "*", SearchOption.AllDirectories);
+                        int count = 0;
+                        
+                        foreach (var f in files)
+                        {
+                            if (cancellationToken.IsCancellationRequested)
+                                break;
+                            
+                            if (count >= 50) // Limit results
+                                break;
+                            
+                            try
+                            {
+                                string fileName = Path.GetFileName(f);
+                                string ext = Path.GetExtension(f);
+                                
+                                if (SupportedExtensions.Contains(ext) && 
+                                    fileName.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    results.Add(f);
+                                    count++;
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }, cancellationToken);
             }
+            catch (OperationCanceledException) { }
             catch { }
             
             return results;
@@ -514,9 +545,27 @@ namespace MultiBoardViewer
             {
                 BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(220, 220, 220)),
                 BorderThickness = new Thickness(0, 0, 1, 0),
-                Padding = new Thickness(20)
+                Padding = new Thickness(20),
+                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(250, 250, 250)),
+                AllowDrop = true // Enable to receive drag events, then block them
             };
             Grid.SetColumn(leftBorder, 0);
+
+            // Block drag & drop events on left column
+            leftBorder.DragEnter += (s, ev) =>
+            {
+                ev.Effects = DragDropEffects.None;
+                ev.Handled = true;
+            };
+            leftBorder.DragOver += (s, ev) =>
+            {
+                ev.Effects = DragDropEffects.None;
+                ev.Handled = true;
+            };
+            leftBorder.Drop += (s, ev) =>
+            {
+                ev.Handled = true; // Block the drop
+            };
 
             // Left column grid with 3 rows
             Grid leftGrid = new Grid();
@@ -663,11 +712,17 @@ namespace MultiBoardViewer
                 }
             };
 
-            // Search box text changed handler
+            // Search box text changed handler with async and cancellation
+            CancellationTokenSource searchCts = null;
             DispatcherTimer searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
-            searchTimer.Tick += (s, ev) =>
+            searchTimer.Tick += async (s, ev) =>
             {
                 searchTimer.Stop();
+                
+                // Cancel previous search
+                searchCts?.Cancel();
+                searchCts = new CancellationTokenSource();
+                var token = searchCts.Token;
                 
                 string searchText = searchBox.Text.Trim();
                 searchResultsPanel.Children.Clear();
@@ -694,7 +749,34 @@ namespace MultiBoardViewer
                     return;
                 }
 
-                var results = SearchFiles(searchText);
+                // Show searching indicator
+                TextBlock searchingText = new TextBlock
+                {
+                    Text = "Searching...",
+                    FontSize = 12,
+                    Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100)),
+                    FontStyle = FontStyles.Italic
+                };
+                searchResultsPanel.Children.Add(searchingText);
+                searchResultsScroll.Visibility = Visibility.Visible;
+                recentPanel.Visibility = Visibility.Collapsed;
+
+                // Search async
+                List<string> results;
+                try
+                {
+                    results = await SearchFilesAsync(searchText, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return; // Search was cancelled
+                }
+
+                // Check if cancelled while searching
+                if (token.IsCancellationRequested)
+                    return;
+
+                searchResultsPanel.Children.Clear();
 
                 if (results.Count == 0)
                 {
@@ -1249,13 +1331,29 @@ namespace MultiBoardViewer
             ShowStatus("New empty tab created - drop a file to open", true);
         }
 
-        // Check if current tab is an empty drop zone tab
+        // Check if current tab is an empty drop zone tab (no process running)
         private bool IsCurrentTabEmpty()
         {
             if (tabControl.SelectedItem is TabItem selectedTab)
             {
-                // Check for new Grid layout or old Border layout
+                // If tab has a running process, it's not empty
+                if (_tabProcesses.ContainsKey(selectedTab))
+                {
+                    return false;
+                }
+                
+                // Check for new tab layout (Grid with drop zone)
                 return selectedTab.Content is Grid || selectedTab.Content is Border;
+            }
+            return false;
+        }
+
+        // Check if current tab has a running viewer process
+        private bool IsCurrentTabHasViewer()
+        {
+            if (tabControl.SelectedItem is TabItem selectedTab)
+            {
+                return _tabProcesses.ContainsKey(selectedTab);
             }
             return false;
         }
@@ -1263,6 +1361,14 @@ namespace MultiBoardViewer
         // Drag & Drop handlers
         private void Window_DragOver(object sender, DragEventArgs e)
         {
+            // Block drop if current tab has a viewer running
+            if (IsCurrentTabHasViewer())
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+            
             // Only allow drop if current tab is empty
             if (e.Data.GetDataPresent(DataFormats.FileDrop) && IsCurrentTabEmpty())
             {
@@ -1277,6 +1383,13 @@ namespace MultiBoardViewer
 
         private void Window_Drop(object sender, DragEventArgs e)
         {
+            // Block drop if current tab has a viewer running
+            if (IsCurrentTabHasViewer())
+            {
+                e.Handled = true;
+                return;
+            }
+            
             // Check if drop was already handled by a drop zone
             if (e.Handled || _dropHandled)
             {
@@ -1958,6 +2071,9 @@ namespace MultiBoardViewer
                 // NOW set parent after removing decorations
                 SetParent(processHandle, panel.Handle);
 
+                // Disable drag & drop on the embedded window
+                DisableDragDrop(processHandle);
+
                 // Resize and reposition the window to fit the panel
                 MoveWindow(processHandle, 0, 0, panel.Width, panel.Height, true);
 
@@ -2020,6 +2136,31 @@ namespace MultiBoardViewer
             return foundHandle;
         }
 
+        // Disable OLE Drag & Drop on a window and all its children
+        private void DisableDragDrop(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero)
+                return;
+
+            try
+            {
+                // Revoke drag drop on the main window
+                RevokeDragDrop(hWnd);
+
+                // Revoke drag drop on all child windows
+                EnumChildWindows(hWnd, (childHwnd, lParam) =>
+                {
+                    try
+                    {
+                        RevokeDragDrop(childHwnd);
+                    }
+                    catch { }
+                    return true; // Continue enumeration
+                }, IntPtr.Zero);
+            }
+            catch { }
+        }
+
         private async void EmbedProcess(Process process, System.Windows.Forms.Panel panel)
         {
             try
@@ -2067,6 +2208,9 @@ namespace MultiBoardViewer
 
                 // Set parent after removing decorations
                 SetParent(processHandle, panel.Handle);
+
+                // Disable drag & drop on the embedded window and all its children
+                DisableDragDrop(processHandle);
 
                 // Resize the window to fit the panel
                 MoveWindow(processHandle, 0, 0, panel.Width, panel.Height, true);
@@ -2332,39 +2476,42 @@ namespace MultiBoardViewer
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            // Close all processes when window is closing
-            foreach (var kvp in _tabProcesses)
+            // Stop resize timer
+            try { _resizeTimer?.Stop(); } catch { }
+            
+            // Close all processes when window is closing - use parallel for speed
+            var processesToKill = _tabProcesses.Values.ToList();
+            
+            System.Threading.Tasks.Parallel.ForEach(processesToKill, processInfo =>
             {
                 try
                 {
-                    if (kvp.Value.Process != null && !kvp.Value.Process.HasExited)
+                    if (processInfo.Process != null && !processInfo.Process.HasExited)
                     {
-                        kvp.Value.Process.CloseMainWindow();
-                        kvp.Value.Process.WaitForExit(1000);
-                        
-                        if (!kvp.Value.Process.HasExited)
-                        {
-                            kvp.Value.Process.Kill();
-                        }
-                        
-                        kvp.Value.Process.Dispose();
-                    }
-
-                    // Clean up temp directory
-                    if (!string.IsNullOrEmpty(kvp.Value.TempDirectory) && Directory.Exists(kvp.Value.TempDirectory))
-                    {
-                        try
-                        {
-                            Directory.Delete(kvp.Value.TempDirectory, true);
-                        }
-                        catch { }
+                        processInfo.Process.Kill();
                     }
                 }
-                catch (Exception ex)
+                catch { }
+                
+                try
                 {
-                    Debug.WriteLine($"Error closing process on exit: {ex.Message}");
+                    processInfo.Process?.Dispose();
                 }
-            }
+                catch { }
+
+                // Clean up temp directory
+                if (!string.IsNullOrEmpty(processInfo.TempDirectory))
+                {
+                    try
+                    {
+                        if (Directory.Exists(processInfo.TempDirectory))
+                        {
+                            Directory.Delete(processInfo.TempDirectory, true);
+                        }
+                    }
+                    catch { }
+                }
+            });
 
             _tabProcesses.Clear();
             

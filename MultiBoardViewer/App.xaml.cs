@@ -13,6 +13,7 @@ namespace MultiBoardViewer
         private static Mutex _mutex;
         private Thread _pipeServerThread;
         private bool _isFirstInstance;
+        private CancellationTokenSource _cancellationTokenSource;
 
         public static string[] StartupFiles { get; private set; }
         public static event Action<string[]> FilesReceived;
@@ -20,22 +21,36 @@ namespace MultiBoardViewer
         protected override void OnStartup(StartupEventArgs e)
         {
             // Try to create mutex to check if another instance is running
-            _mutex = new Mutex(true, MutexName, out _isFirstInstance);
+            bool createdNew;
+            try
+            {
+                _mutex = new Mutex(true, MutexName, out createdNew);
+                _isFirstInstance = createdNew;
+            }
+            catch (AbandonedMutexException)
+            {
+                // Previous instance crashed, we can take over
+                _isFirstInstance = true;
+            }
 
             if (!_isFirstInstance)
             {
                 // Another instance is running, send files to it
-                if (e.Args != null && e.Args.Length > 0)
+                try
                 {
-                    SendFilesToRunningInstance(e.Args);
+                    if (e.Args != null && e.Args.Length > 0)
+                    {
+                        SendFilesToRunningInstance(e.Args);
+                    }
+                    else
+                    {
+                        SendFilesToRunningInstance(new string[] { "__ACTIVATE__" });
+                    }
                 }
-                else
-                {
-                    // No files, just activate the existing window
-                    SendFilesToRunningInstance(new string[] { "__ACTIVATE__" });
-                }
+                catch { }
                 
-                // Exit this instance
+                // Release mutex and exit
+                try { _mutex?.Dispose(); } catch { }
                 Shutdown();
                 return;
             }
@@ -43,13 +58,14 @@ namespace MultiBoardViewer
             // This is the first instance
             base.OnStartup(e);
             
-            // Store command line arguments (files to open)
+            // Store command line arguments
             if (e.Args != null && e.Args.Length > 0)
             {
                 StartupFiles = e.Args;
             }
 
-            // Start pipe server to receive files from other instances
+            // Start pipe server
+            _cancellationTokenSource = new CancellationTokenSource();
             StartPipeServer();
         }
 
@@ -57,41 +73,62 @@ namespace MultiBoardViewer
         {
             _pipeServerThread = new Thread(PipeServerLoop)
             {
-                IsBackground = true
+                IsBackground = true,
+                Name = "PipeServerThread"
             };
             _pipeServerThread.Start();
         }
 
         private void PipeServerLoop()
         {
-            while (true)
+            while (!_cancellationTokenSource.Token.IsCancellationRequested)
             {
+                NamedPipeServerStream server = null;
                 try
                 {
-                    using (var server = new NamedPipeServerStream(PipeName, PipeDirection.In))
+                    server = new NamedPipeServerStream(PipeName, PipeDirection.In, 1, 
+                        PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    
+                    // Wait for connection with cancellation support
+                    var asyncResult = server.BeginWaitForConnection(null, null);
+                    
+                    // Wait with timeout to allow checking cancellation
+                    while (!asyncResult.AsyncWaitHandle.WaitOne(500))
                     {
-                        server.WaitForConnection();
-                        
-                        using (var reader = new StreamReader(server))
+                        if (_cancellationTokenSource.Token.IsCancellationRequested)
                         {
-                            string data = reader.ReadToEnd();
-                            if (!string.IsNullOrEmpty(data))
+                            server.Dispose();
+                            return;
+                        }
+                    }
+                    
+                    server.EndWaitForConnection(asyncResult);
+                    
+                    using (var reader = new StreamReader(server))
+                    {
+                        string data = reader.ReadToEnd();
+                        if (!string.IsNullOrEmpty(data))
+                        {
+                            string[] files = data.Split(new[] { "|" }, StringSplitOptions.RemoveEmptyEntries);
+                            
+                            Dispatcher.BeginInvoke(new Action(() =>
                             {
-                                string[] files = data.Split(new[] { "|" }, StringSplitOptions.RemoveEmptyEntries);
-                                
-                                // Invoke on UI thread
-                                Dispatcher.BeginInvoke(new Action(() =>
+                                try
                                 {
                                     FilesReceived?.Invoke(files);
-                                }));
-                            }
+                                }
+                                catch { }
+                            }));
                         }
                     }
                 }
                 catch (Exception)
                 {
-                    // Pipe was closed or error occurred
-                    break;
+                    // Ignore errors and continue loop
+                }
+                finally
+                {
+                    try { server?.Dispose(); } catch { }
                 }
             }
         }
@@ -102,7 +139,7 @@ namespace MultiBoardViewer
             {
                 using (var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out))
                 {
-                    client.Connect(3000); // 3 second timeout
+                    client.Connect(2000); // 2 second timeout
                     
                     using (var writer = new StreamWriter(client))
                     {
@@ -111,16 +148,37 @@ namespace MultiBoardViewer
                     }
                 }
             }
+            catch (TimeoutException)
+            {
+                // Running instance not responding, user can try again
+            }
             catch (Exception)
             {
-                // Failed to connect to running instance
+                // Failed to connect
             }
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
-            _mutex?.ReleaseMutex();
-            _mutex?.Dispose();
+            // Signal pipe server to stop
+            try { _cancellationTokenSource?.Cancel(); } catch { }
+            
+            // Wait briefly for thread to exit
+            try { _pipeServerThread?.Join(1000); } catch { }
+            
+            // Release mutex
+            try
+            {
+                if (_isFirstInstance && _mutex != null)
+                {
+                    _mutex.ReleaseMutex();
+                }
+            }
+            catch { }
+            
+            try { _mutex?.Dispose(); } catch { }
+            try { _cancellationTokenSource?.Dispose(); } catch { }
+            
             base.OnExit(e);
         }
     }
