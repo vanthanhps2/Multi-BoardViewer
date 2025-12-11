@@ -90,6 +90,8 @@ namespace MultiBoardViewer
         private List<string> _recentFiles = new List<string>(); // Recent files history
         private const int MaxRecentFiles = 10;
         private const string RecentFilesFileName = "recent_files.txt";
+        private string _searchFolder = ""; // Folder for file search
+        private const string SearchFolderFileName = "search_folder.txt";
 
         private class ProcessInfo
         {
@@ -171,6 +173,73 @@ namespace MultiBoardViewer
             catch { }
         }
 
+        // Load search folder from file
+        private void LoadSearchFolder()
+        {
+            try
+            {
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string searchFolderPath = Path.Combine(appDir, SearchFolderFileName);
+                
+                if (File.Exists(searchFolderPath))
+                {
+                    string folder = File.ReadAllText(searchFolderPath).Trim();
+                    if (Directory.Exists(folder))
+                    {
+                        _searchFolder = folder;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Save search folder to file
+        private void SaveSearchFolder()
+        {
+            try
+            {
+                string appDir = AppDomain.CurrentDomain.BaseDirectory;
+                string searchFolderPath = Path.Combine(appDir, SearchFolderFileName);
+                File.WriteAllText(searchFolderPath, _searchFolder);
+            }
+            catch { }
+        }
+
+        // Search files in the configured folder
+        private List<string> SearchFiles(string searchText)
+        {
+            var results = new List<string>();
+            
+            if (string.IsNullOrEmpty(_searchFolder) || !Directory.Exists(_searchFolder))
+                return results;
+            
+            if (string.IsNullOrWhiteSpace(searchText))
+                return results;
+
+            try
+            {
+                // Supported file extensions
+                string[] extensions = { ".pdf", ".fz", ".brd", ".bom", ".cad", ".bdv", ".asc" };
+                
+                // Search recursively
+                var files = Directory.EnumerateFiles(_searchFolder, "*", SearchOption.AllDirectories)
+                    .Where(f => 
+                    {
+                        string fileName = Path.GetFileName(f);
+                        string ext = Path.GetExtension(f).ToLowerInvariant();
+                        return extensions.Contains(ext) && 
+                               fileName.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
+                    })
+                    .Take(50) // Limit results
+                    .ToList();
+                
+                results.AddRange(files);
+            }
+            catch { }
+            
+            return results;
+        }
+
         // Add file to recent history
         private void AddToRecentFiles(string filePath)
         {
@@ -199,6 +268,9 @@ namespace MultiBoardViewer
             
             // Load recent files history
             LoadRecentFiles();
+            
+            // Load search folder setting
+            LoadSearchFolder();
             
             // Initialize timer for handling window resizing
             _resizeTimer = new DispatcherTimer();
@@ -446,18 +518,296 @@ namespace MultiBoardViewer
             };
             Grid.SetColumn(leftBorder, 0);
 
-            // Left column grid with 2 rows
+            // Left column grid with 3 rows
             Grid leftGrid = new Grid();
-            leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Recent files
-            leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // About section
+            leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // Search section
+            leftGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) }); // Recent files / Search results
+            leftGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); // About section
 
-            // ----- Recent Files Section -----
+            // ----- Search Section -----
+            StackPanel searchSection = new StackPanel
+            {
+                Margin = new Thickness(0, 0, 0, 15)
+            };
+            Grid.SetRow(searchSection, 0);
+
+            TextBlock searchTitle = new TextBlock
+            {
+                Text = "🔍 Search files",
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(50, 50, 50)),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+            searchSection.Children.Add(searchTitle);
+
+            // Search box and folder button
+            Grid searchGrid = new Grid();
+            searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            TextBox searchBox = new TextBox
+            {
+                FontSize = 13,
+                Padding = new Thickness(8, 6, 28, 6), // Extra padding on right for clear button
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            
+            // Placeholder text
+            TextBlock placeholder = new TextBlock
+            {
+                Text = string.IsNullOrEmpty(_searchFolder) ? "Set folder first →" : "Type to search...",
+                FontSize = 13,
+                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 160, 160)),
+                IsHitTestVisible = false,
+                Padding = new Thickness(10, 7, 0, 0)
+            };
+
+            // Clear button (X)
+            Button clearButton = new Button
+            {
+                Content = "✕",
+                FontSize = 10,
+                Width = 18,
+                Height = 18,
+                Padding = new Thickness(0),
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(150, 150, 150)),
+                Cursor = Cursors.Hand,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 5, 0),
+                Visibility = Visibility.Collapsed,
+                ToolTip = "Clear search"
+            };
+
+            // Clear button hover effect
+            clearButton.MouseEnter += (s, ev) =>
+            {
+                clearButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(255, 80, 80));
+            };
+            clearButton.MouseLeave += (s, ev) =>
+            {
+                clearButton.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(150, 150, 150));
+            };
+
+            // Clear button click
+            clearButton.Click += (s, ev) =>
+            {
+                searchBox.Text = "";
+                searchBox.Focus();
+            };
+
+            Grid searchBoxContainer = new Grid();
+            searchBoxContainer.Children.Add(searchBox);
+            searchBoxContainer.Children.Add(placeholder);
+            searchBoxContainer.Children.Add(clearButton);
+            Grid.SetColumn(searchBoxContainer, 0);
+
+            Button folderButton = new Button
+            {
+                Content = "📁",
+                FontSize = 14,
+                Width = 36,
+                Margin = new Thickness(5, 0, 0, 0),
+                ToolTip = string.IsNullOrEmpty(_searchFolder) ? "Select search folder" : $"Folder: {_searchFolder}",
+                Cursor = Cursors.Hand
+            };
+            Grid.SetColumn(folderButton, 1);
+
+            searchGrid.Children.Add(searchBoxContainer);
+            searchGrid.Children.Add(folderButton);
+            searchSection.Children.Add(searchGrid);
+
+            // ----- Recent Files Section (declare early for use in search handlers) -----
             StackPanel recentPanel = new StackPanel
             {
                 VerticalAlignment = VerticalAlignment.Top
             };
-            Grid.SetRow(recentPanel, 0);
+            Grid.SetRow(recentPanel, 1);
 
+            // Search results panel (hidden by default, shows when searching)
+            ScrollViewer searchResultsScroll = new ScrollViewer
+            {
+                MaxHeight = 300,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Margin = new Thickness(0, 10, 0, 0),
+                Visibility = Visibility.Collapsed
+            };
+            StackPanel searchResultsPanel = new StackPanel();
+            searchResultsScroll.Content = searchResultsPanel;
+            searchSection.Children.Add(searchResultsScroll);
+
+            // Folder button click handler
+            folderButton.Click += (s, ev) =>
+            {
+                using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
+                {
+                    dialog.Description = "Select folder to search for files";
+                    dialog.ShowNewFolderButton = false;
+                    
+                    if (!string.IsNullOrEmpty(_searchFolder) && Directory.Exists(_searchFolder))
+                    {
+                        dialog.SelectedPath = _searchFolder;
+                    }
+                    
+                    if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                    {
+                        _searchFolder = dialog.SelectedPath;
+                        SaveSearchFolder();
+                        folderButton.ToolTip = $"Folder: {_searchFolder}";
+                        placeholder.Text = "Type to search...";
+                        ShowStatus($"Search folder set: {_searchFolder}", true);
+                    }
+                }
+            };
+
+            // Search box text changed handler
+            DispatcherTimer searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+            searchTimer.Tick += (s, ev) =>
+            {
+                searchTimer.Stop();
+                
+                string searchText = searchBox.Text.Trim();
+                searchResultsPanel.Children.Clear();
+
+                if (string.IsNullOrWhiteSpace(searchText))
+                {
+                    searchResultsScroll.Visibility = Visibility.Collapsed;
+                    recentPanel.Visibility = Visibility.Visible;
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(_searchFolder))
+                {
+                    TextBlock noFolder = new TextBlock
+                    {
+                        Text = "⚠️ Please select a search folder first (click 📁)",
+                        FontSize = 12,
+                        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(200, 100, 0)),
+                        TextWrapping = TextWrapping.Wrap
+                    };
+                    searchResultsPanel.Children.Add(noFolder);
+                    searchResultsScroll.Visibility = Visibility.Visible;
+                    recentPanel.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                var results = SearchFiles(searchText);
+
+                if (results.Count == 0)
+                {
+                    TextBlock noResults = new TextBlock
+                    {
+                        Text = $"No files found matching \"{searchText}\"",
+                        FontSize = 12,
+                        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(150, 150, 150)),
+                        FontStyle = FontStyles.Italic
+                    };
+                    searchResultsPanel.Children.Add(noResults);
+                }
+                else
+                {
+                    TextBlock resultCount = new TextBlock
+                    {
+                        Text = $"Found {results.Count} file(s):",
+                        FontSize = 11,
+                        Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100)),
+                        Margin = new Thickness(0, 0, 0, 5)
+                    };
+                    searchResultsPanel.Children.Add(resultCount);
+
+                    foreach (string filePath in results)
+                    {
+                        string fileName = Path.GetFileName(filePath);
+                        
+                        Button fileButton = new Button
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            HorizontalContentAlignment = HorizontalAlignment.Left,
+                            Background = System.Windows.Media.Brushes.Transparent,
+                            BorderThickness = new Thickness(0),
+                            Padding = new Thickness(8, 5, 8, 5),
+                            Margin = new Thickness(0, 1, 0, 1),
+                            Cursor = Cursors.Hand,
+                            Tag = filePath,
+                            ToolTip = filePath
+                        };
+
+                        StackPanel fileNamePanel = new StackPanel { Orientation = Orientation.Horizontal };
+                        string fileIcon = filePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "📕" : "📘";
+                        TextBlock iconBlock = new TextBlock
+                        {
+                            Text = fileIcon,
+                            FontSize = 12,
+                            Margin = new Thickness(0, 0, 6, 0),
+                            VerticalAlignment = VerticalAlignment.Center
+                        };
+                        TextBlock nameBlock = new TextBlock
+                        {
+                            Text = fileName,
+                            FontSize = 12,
+                            Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(30, 30, 30)),
+                            TextTrimming = TextTrimming.CharacterEllipsis
+                        };
+                        fileNamePanel.Children.Add(iconBlock);
+                        fileNamePanel.Children.Add(nameBlock);
+                        fileButton.Content = fileNamePanel;
+
+                        fileButton.MouseEnter += (sender, args) =>
+                        {
+                            fileButton.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(230, 240, 250));
+                        };
+                        fileButton.MouseLeave += (sender, args) =>
+                        {
+                            fileButton.Background = System.Windows.Media.Brushes.Transparent;
+                        };
+
+                        string capturedPath = filePath;
+                        fileButton.Click += (sender, args) =>
+                        {
+                            if (File.Exists(capturedPath))
+                            {
+                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                    return;
+
+                                if (capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    OpenPdfInTab(newTab, capturedPath);
+                                }
+                                else
+                                {
+                                    OpenBoardViewerInTab(newTab, capturedPath);
+                                }
+                            }
+                            else
+                            {
+                                MessageBox.Show($"File not found:\n{capturedPath}", "File Not Found",
+                                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                            }
+                        };
+
+                        searchResultsPanel.Children.Add(fileButton);
+                    }
+                }
+
+                searchResultsScroll.Visibility = Visibility.Visible;
+                recentPanel.Visibility = Visibility.Collapsed;
+            };
+
+            searchBox.TextChanged += (s, ev) =>
+            {
+                bool hasText = !string.IsNullOrEmpty(searchBox.Text);
+                placeholder.Visibility = hasText ? Visibility.Collapsed : Visibility.Visible;
+                clearButton.Visibility = hasText ? Visibility.Visible : Visibility.Collapsed;
+                searchTimer.Stop();
+                searchTimer.Start();
+            };
+
+            leftGrid.Children.Add(searchSection);
+
+            // ----- Recent Files Content -----
             TextBlock recentTitle = new TextBlock
             {
                 Text = "📋 Recent files",
@@ -577,7 +927,7 @@ namespace MultiBoardViewer
                 VerticalAlignment = VerticalAlignment.Bottom,
                 Margin = new Thickness(0, 20, 0, 0)
             };
-            Grid.SetRow(aboutSection, 1);
+            Grid.SetRow(aboutSection, 2);
 
             // About content (hidden by default)
             Border aboutContent = new Border
