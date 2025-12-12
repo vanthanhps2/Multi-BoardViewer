@@ -8,6 +8,7 @@ namespace MultiBoardViewer
         {
             BoardViewer,
             OpenBoardView,
+            FlexBoardView,
             Cancel
         }
 
@@ -16,7 +17,7 @@ namespace MultiBoardViewer
         public ViewerSelectionDialog(string fileName)
         {
             InitializeComponent();
-            FileNameText.Text = $"Choose viewer for {fileName}:";
+            FileNameText.Text = $"Choose viewer for {fileName}";
             Result = ViewerResult.Cancel;
         }
 
@@ -30,6 +31,13 @@ namespace MultiBoardViewer
         private void OpenBoardViewButton_Click(object sender, RoutedEventArgs e)
         {
             Result = ViewerResult.OpenBoardView;
+            DialogResult = true;
+            Close();
+        }
+
+        private void FlexBoardViewButton_Click(object sender, RoutedEventArgs e)
+        {
+            Result = ViewerResult.FlexBoardView;
             DialogResult = true;
             Close();
         }
