@@ -22,6 +22,7 @@ Dự án này sử dụng sản phẩm của họ để tạo nên trải nghi�
 - 🔧 **BoardViewer Integration**: Xem các file schematic/board (.brd, .bdv, .fz, .cad, v.v.)
 - 📄 **PDF Viewer**: Xem file PDF với SumatraPDF tích hợp
 - 📑 **Multi-tab**: Mở nhiều file cùng lúc trong các tab riêng biệt
+- 🔎 **Search files**: Tìm kiếm file trong thư mục/ổ đĩa được chỉ định
 
 ## 📋 Yêu cầu hệ thống
 
@@ -56,6 +57,7 @@ cd Multi-BoardViewer
 - **Drag & Drop**: Kéo thả file vào cửa sổ ứng dụng
 - **Tab mới**: Click nút **+** để tạo tab mới, sau đó kéo thả file vào
 - **Recent files**: Mở tab mới và chọn file từ danh sách gần đây
+- **Search files**: Chọn thư mục/ổ đĩa chứa file ở icon thư mục → Nhập tên file vào ô tìm kiếm → Click file để mở
 - **Open with**: Chuột phải file → Open with → MultiBoardViewer
 
 ### Quản lý tab
