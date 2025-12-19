@@ -1,11 +1,12 @@
 # Multi BoardViewer
 
-Ứng dụng Windows giúp xem nhiều **Sơ đồ mạch (Board View)** và **Sơ đồ nguyên lý (Schematic)** trong một ứng dụng
+Ứng dụng Windows giúp xem nhiều **Sơ đồ mạch** và **Sơ đồ nguyên lý** trong cùng một ứng dụng
 
 ![Multi BoardViewer](https://img.shields.io/badge/.NET-8.0-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-brightgreen) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ![Multi BoardViewer](./Photos/1.png)
 ![Multi BoardViewer](./Photos/2.png)
+![Multi BoardViewer](./Photos/5.png)
 
 ## 🙏 Lời cảm ơn
 
@@ -58,6 +59,7 @@ cd Multi-BoardViewer
 - **Tab mới**: Click nút **+** để tạo tab mới, sau đó kéo thả file vào
 - **Recent files**: Mở tab mới và chọn file từ danh sách gần đây
 - **Search files**: Chọn thư mục/ổ đĩa chứa file ở icon thư mục → Nhập tên file vào ô tìm kiếm → Click file để mở
+- **Mặt định**: File boardview sẽ mở bằng BoardViewer, click chuột phải để mở bằng OpenBoardView hoặc FlexBoardView
 - **Open with**: Chuột phải file → Open with → MultiBoardViewer
 
 ### Quản lý tab
@@ -81,14 +83,13 @@ cd Multi-BoardViewer
 |--------|-----------|
 | Phím tắt không hoạt động | Click vào vùng BoardViewer trong tab để set focus |
 | BoardViewer thoát khi tạo tab mới | Options > Options > bỏ tick Use Only Instance of Program |
-| Tab mới không hiển thị gì | Đợi vài giây hoặc thử đóng tab và tạo lại |
-| Không mở được PDF | Kiểm tra thư mục `SumatraPDF` có chứa `SumatraPDF.exe` |
+| Tab mới không hiển thị gì | Đợi vài giây hoặc thử đóng tab và mở lại |
 
 ## 💡 Tips
 
 - Hover vào tab để tự động set focus
 - Mỗi tab hoàn toàn độc lập với nhau
-- File đã mở sẽ không được mở lại (chuyển sang tab hiện có)
+- File đã mở sẽ không được mở trong tab mới mà chuyển sang tab hiện có
 
 ---
 
