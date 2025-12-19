@@ -881,6 +881,7 @@ namespace MultiBoardViewer
                         };
 
                         string capturedPath = filePath;
+                        // Left click to open file (BoardViewer by default)
                         fileButton.Click += (sender, args) =>
                         {
                             if (File.Exists(capturedPath))
@@ -894,7 +895,8 @@ namespace MultiBoardViewer
                                 }
                                 else
                                 {
-                                    OpenBoardFileInTab(newTab, capturedPath);
+                                    // Open with BoardViewer by default
+                                    OpenBoardViewerInTab(newTab, capturedPath);
                                 }
                             }
                             else
@@ -902,6 +904,44 @@ namespace MultiBoardViewer
                                 MessageBox.Show($"File not found:\n{capturedPath}", "File Not Found",
                                     MessageBoxButton.OK, MessageBoxImage.Warning);
                             }
+                        };
+
+                        // Right click to show context menu
+                        fileButton.MouseRightButtonDown += (sender, args) =>
+                        {
+                            args.Handled = true; // Prevent default context menu
+                            
+                            if (!File.Exists(capturedPath))
+                                return;
+
+                            // Only show context menu for board files (not PDF)
+                            if (capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                                return;
+
+                            ContextMenu contextMenu = new ContextMenu();
+                            contextMenu.PlacementTarget = fileButton;
+                            contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+                            
+                            MenuItem openBoardViewItem = new MenuItem { Header = "Open with OpenBoardView" };
+                            openBoardViewItem.Click += (s, e) =>
+                            {
+                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                    return;
+                                OpenOpenBoardViewInTab(newTab, capturedPath);
+                            };
+                            
+                            MenuItem flexBoardViewItem = new MenuItem { Header = "Open with FlexBoardView" };
+                            flexBoardViewItem.Click += (s, e) =>
+                            {
+                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                    return;
+                                OpenFlexBoardViewInTab(newTab, capturedPath);
+                            };
+                            
+                            contextMenu.Items.Add(openBoardViewItem);
+                            contextMenu.Items.Add(flexBoardViewItem);
+                            
+                            contextMenu.IsOpen = true;
                         };
 
                         searchResultsPanel.Children.Add(fileButton);
@@ -998,7 +1038,7 @@ namespace MultiBoardViewer
                         fileButton.Background = System.Windows.Media.Brushes.Transparent;
                     };
 
-                    // Click to open file
+                    // Click to open file (left click = BoardViewer)
                     string capturedPath = filePath; // Capture for closure
                     fileButton.Click += (s, ev) =>
                     {
@@ -1016,7 +1056,8 @@ namespace MultiBoardViewer
                             }
                             else
                             {
-                                OpenBoardFileInTab(newTab, capturedPath);
+                                // Open with BoardViewer by default
+                                OpenBoardViewerInTab(newTab, capturedPath);
                             }
                         }
                         else
@@ -1027,6 +1068,44 @@ namespace MultiBoardViewer
                             _recentFiles.Remove(capturedPath);
                             SaveRecentFiles();
                         }
+                    };
+
+                    // Right click to show context menu
+                    fileButton.MouseRightButtonDown += (s, ev) =>
+                    {
+                        ev.Handled = true; // Prevent default context menu
+                        
+                        if (!File.Exists(capturedPath))
+                            return;
+
+                        // Only show context menu for board files (not PDF)
+                        if (capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                            return;
+
+                        ContextMenu contextMenu = new ContextMenu();
+                        contextMenu.PlacementTarget = fileButton;
+                        contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
+                        
+                        MenuItem openBoardViewItem = new MenuItem { Header = "Open with OpenBoardView" };
+                        openBoardViewItem.Click += (sender, args) =>
+                        {
+                            if (TrySwitchToExistingTabByFileName(capturedPath))
+                                return;
+                            OpenOpenBoardViewInTab(newTab, capturedPath);
+                        };
+                        
+                        MenuItem flexBoardViewItem = new MenuItem { Header = "Open with FlexBoardView" };
+                        flexBoardViewItem.Click += (sender, args) =>
+                        {
+                            if (TrySwitchToExistingTabByFileName(capturedPath))
+                                return;
+                            OpenFlexBoardViewInTab(newTab, capturedPath);
+                        };
+                        
+                        contextMenu.Items.Add(openBoardViewItem);
+                        contextMenu.Items.Add(flexBoardViewItem);
+                        
+                        contextMenu.IsOpen = true;
                     };
 
                     recentFilesList.Children.Add(fileButton);
@@ -1870,6 +1949,165 @@ namespace MultiBoardViewer
 
             // Open with choice
             OpenBoardFileInTab(newTab, filePath);
+        }
+
+        private void OpenOpenBoardViewWithFile(string filePath)
+        {
+            // Check if file is already open
+            if (TrySwitchToExistingTab(filePath))
+                return;
+
+            if (string.IsNullOrEmpty(_openBoardViewPath) || !File.Exists(_openBoardViewPath))
+            {
+                MessageBox.Show("OpenBoardView.exe not found!\n\nPlease place OpenBoardView.exe in the same folder as this application.", 
+                    "OpenBoardView Not Found", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                // Create new tab
+                TabItem newTab = new TabItem
+                {
+                    Header = Path.GetFileName(filePath)
+                };
+
+                // Create a WindowsFormsHost to embed the external process
+                WindowsFormsHost host = new WindowsFormsHost();
+                host.Focusable = true;
+                
+                System.Windows.Forms.Panel panel = new System.Windows.Forms.Panel
+                {
+                    Dock = System.Windows.Forms.DockStyle.Fill
+                };
+                host.Child = panel;
+                newTab.Content = host;
+
+                // Insert tab before the "+" button
+                int insertIndex = tabControl.Items.Count;
+                if (_addTabButton != null && tabControl.Items.Contains(_addTabButton))
+                {
+                    insertIndex = tabControl.Items.IndexOf(_addTabButton);
+                }
+                tabControl.Items.Insert(insertIndex, newTab);
+                tabControl.SelectedItem = newTab;
+
+                // Start OpenBoardView process with the file
+                Process process = new Process();
+                process.StartInfo.FileName = _openBoardViewPath;
+                process.StartInfo.Arguments = $"\"{filePath}\"";
+                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(_openBoardViewPath);
+                process.EnableRaisingEvents = true;
+                process.Exited += (s, ev) => Process_Exited(newTab);
+
+                process.Start();
+
+                // Store process info
+                _tabProcesses[newTab] = new ProcessInfo
+                {
+                    Process = process,
+                    Host = host,
+                    Panel = panel,
+                    TempDirectory = null,
+                    AppType = "OpenBoardView",
+                    WindowHandle = IntPtr.Zero,
+                    FilePath = filePath
+                };
+
+                // Add to recent files
+                AddToRecentFiles(filePath);
+
+                // Embed the process window into the panel
+                EmbedProcess(process, panel);
+
+                ShowStatus($"Opened: {Path.GetFileName(filePath)}", true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening file: {ex.Message}", 
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async void OpenFlexBoardViewWithFile(string filePath)
+        {
+            // Check if file is already open
+            if (TrySwitchToExistingTab(filePath))
+                return;
+
+            if (string.IsNullOrEmpty(_flexBoardViewPath) || !File.Exists(_flexBoardViewPath))
+            {
+                MessageBox.Show("FlexBoardView.exe not found!\n\nPlease place FlexBoardView.exe in the same folder as this application.", 
+                    "FlexBoardView Not Found", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                // Create new tab
+                TabItem newTab = new TabItem
+                {
+                    Header = Path.GetFileName(filePath)
+                };
+
+                // Create a WindowsFormsHost to embed the external process
+                WindowsFormsHost host = new WindowsFormsHost();
+                host.Focusable = true;
+                
+                System.Windows.Forms.Panel panel = new System.Windows.Forms.Panel
+                {
+                    Dock = System.Windows.Forms.DockStyle.Fill
+                };
+                host.Child = panel;
+                newTab.Content = host;
+
+                // Insert tab before the "+" button
+                int insertIndex = tabControl.Items.Count;
+                if (_addTabButton != null && tabControl.Items.Contains(_addTabButton))
+                {
+                    insertIndex = tabControl.Items.IndexOf(_addTabButton);
+                }
+                tabControl.Items.Insert(insertIndex, newTab);
+                tabControl.SelectedItem = newTab;
+
+                // Clean FlexBoardView logs folder before starting to prevent crash dialogs
+                CleanFlexBoardViewLogs();
+
+                // Start FlexBoardView process with the file
+                Process process = new Process();
+                process.StartInfo.FileName = _flexBoardViewPath;
+                process.StartInfo.Arguments = $"\"{filePath}\"";
+                process.StartInfo.WorkingDirectory = Path.GetDirectoryName(_flexBoardViewPath);
+                process.EnableRaisingEvents = true;
+                process.Exited += (s, ev) => Process_Exited(newTab);
+
+                process.Start();
+
+                // Store process info
+                _tabProcesses[newTab] = new ProcessInfo
+                {
+                    Process = process,
+                    Host = host,
+                    Panel = panel,
+                    TempDirectory = null,
+                    AppType = "FlexBoardView",
+                    WindowHandle = IntPtr.Zero,
+                    FilePath = filePath
+                };
+
+                // Add to recent files
+                AddToRecentFiles(filePath);
+
+                // Try to embed FlexBoardView with improved error handling
+                await EmbedFlexBoardViewSafely(process, panel, newTab, filePath);
+
+                ShowStatus($"Opened: {Path.GetFileName(filePath)}", true);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error opening file: {ex.Message}", 
+                    "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void OpenPdfInNewTab(string pdfPath)
