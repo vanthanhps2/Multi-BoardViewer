@@ -389,6 +389,9 @@ namespace MultiBoardViewer
             // Handle window resize to update embedded processes
             this.SizeChanged += MainWindow_SizeChanged;
 
+            // Handle window activation to restore focus to embedded apps
+            this.Activated += MainWindow_Activated;
+
             // Also handle layout updates for more responsive resizing
             this.LayoutUpdated += MainWindow_LayoutUpdated;
 
@@ -3174,41 +3177,65 @@ namespace MultiBoardViewer
             _resizeTimer.Start();
 
             // Set focus to the selected tab's embedded window
-            if (tabControl.SelectedItem is TabItem selectedTab && _tabProcesses.ContainsKey(selectedTab))
-            {
-                ProcessInfo processInfo = _tabProcesses[selectedTab];
-                if (processInfo.Process != null && !processInfo.Process.HasExited)
-                {
-                    IntPtr handle;
+            RestoreFocusToCurrentTab();
+        }
 
-                    // For SumatraPDF in plugin mode, find child window of panel
-                    if (processInfo.AppType == "SumatraPDF")
+        private void MainWindow_Activated(object sender, EventArgs e)
+        {
+            RestoreFocusToCurrentTab();
+        }
+
+        private void RestoreFocusToCurrentTab()
+        {
+            // Use Dispatcher to ensure UI is ready
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (tabControl.SelectedItem is TabItem selectedTab && _tabProcesses.ContainsKey(selectedTab))
+                {
+                    ProcessInfo processInfo = _tabProcesses[selectedTab];
+                    if (processInfo.Process != null && !processInfo.Process.HasExited)
                     {
-                        handle = GetWindow(processInfo.Panel.Handle, GW_CHILD);
-                        if (handle != IntPtr.Zero)
+                        IntPtr handle;
+
+                        // For SumatraPDF in plugin mode, find child window of panel
+                        if (processInfo.AppType == "SumatraPDF")
                         {
-                            processInfo.WindowHandle = handle;
+                            handle = GetWindow(processInfo.Panel.Handle, GW_CHILD);
+                            if (handle != IntPtr.Zero)
+                            {
+                                processInfo.WindowHandle = handle;
+                            }
+                            else
+                            {
+                                handle = processInfo.WindowHandle;
+                            }
                         }
                         else
                         {
-                            handle = processInfo.WindowHandle;
+                            handle = processInfo.WindowHandle != IntPtr.Zero
+                                ? processInfo.WindowHandle
+                                : processInfo.Process.MainWindowHandle;
+                        }
+
+                        if (handle != IntPtr.Zero)
+                        {
+                            // Ensure the host is focused in WPF
+                            if (processInfo.Host != null)
+                            {
+                                processInfo.Host.Focus();
+                            }
+
+                            // Set focus to the embedded window
+                            SetFocus(handle);
+                            
+                            // Note: SetForegroundWindow is generally for top-level windows, 
+                            // but can help bring the thread to foreground if needed.
+                            // However, strictly adhering to SetFocus for child windows is usually safer 
+                            // if the parent (WPF) is already active.
                         }
                     }
-                    else
-                    {
-                        handle = processInfo.WindowHandle != IntPtr.Zero
-                            ? processInfo.WindowHandle
-                            : processInfo.Process.MainWindowHandle;
-                    }
-
-                    if (handle != IntPtr.Zero)
-                    {
-                        // Set focus to the embedded window
-                        SetFocus(handle);
-                        SetForegroundWindow(handle);
-                    }
                 }
-            }
+            }), DispatcherPriority.Input);
         }
 
         private void ResizeTimer_Tick(object sender, EventArgs e)
