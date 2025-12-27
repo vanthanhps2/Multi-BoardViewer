@@ -2519,22 +2519,7 @@ namespace MultiBoardViewer
                 resizeSumatra();
             };
 
-            // Handle focus
-            panel.MouseEnter += (s, e) =>
-            {
-                if (!process.HasExited && processInfo.WindowHandle != IntPtr.Zero)
-                {
-                    SetFocus(processInfo.WindowHandle);
-                }
-            };
 
-            panel.Click += (s, e) =>
-            {
-                if (!process.HasExited && processInfo.WindowHandle != IntPtr.Zero)
-                {
-                    SetFocus(processInfo.WindowHandle);
-                }
-            };
         }
         private async void EmbedSumatraAsync(Process process, System.Windows.Forms.Panel panel)
         {
@@ -2625,28 +2610,7 @@ namespace MultiBoardViewer
                 }
             }
 
-            // Setup focus handlers
-            panel.Click -= Panel_Click;
-            panel.Click += Panel_Click;
 
-            void Panel_Click(object sender, EventArgs e)
-            {
-                if (!process.HasExited && windowHandle != IntPtr.Zero)
-                {
-                    SetFocus(windowHandle);
-                }
-            }
-
-            panel.MouseEnter -= Panel_MouseEnter;
-            panel.MouseEnter += Panel_MouseEnter;
-
-            void Panel_MouseEnter(object sender, EventArgs e)
-            {
-                if (!process.HasExited && windowHandle != IntPtr.Zero)
-                {
-                    SetFocus(windowHandle);
-                }
-            }
         }
 
         private async void EmbedProcessAsync(Process process, System.Windows.Forms.Panel panel, TabItem tab)
@@ -2703,8 +2667,7 @@ namespace MultiBoardViewer
                 // Show the window
                 ShowWindow(processHandle, SW_SHOW);
 
-                // Set focus
-                SetFocus(processHandle);
+
 
                 // Handle panel resize
                 panel.Resize += (s, e) =>
@@ -2715,24 +2678,7 @@ namespace MultiBoardViewer
                     }
                 };
 
-                // Handle panel click to set focus
-                panel.Click += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                        SetForegroundWindow(processHandle);
-                    }
-                };
 
-                // Handle mouse enter to give focus
-                panel.MouseEnter += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                    }
-                };
             }
             catch (Exception ex)
             {
@@ -2849,22 +2795,7 @@ namespace MultiBoardViewer
                     }
                 };
 
-                // Setup focus handlers
-                panel.Click += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                    }
-                };
 
-                panel.MouseEnter += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                    }
-                };
 
                 Dispatcher.Invoke(() => ShowStatus("FlexBoardView embedded successfully", true));
             }
@@ -2932,8 +2863,7 @@ namespace MultiBoardViewer
                 // Show the window now that it's embedded
                 ShowWindow(processHandle, SW_SHOW);
 
-                // Set focus to the embedded window
-                SetFocus(processHandle);
+
 
                 // Handle panel resize
                 panel.Resize += (s, e) =>
@@ -2944,24 +2874,7 @@ namespace MultiBoardViewer
                     }
                 };
 
-                // Handle panel click to set focus to embedded window
-                panel.Click += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                        SetForegroundWindow(processHandle);
-                    }
-                };
 
-                // Handle mouse enter to give focus
-                panel.MouseEnter += (s, e) =>
-                {
-                    if (!process.HasExited && processHandle != IntPtr.Zero)
-                    {
-                        SetFocus(processHandle);
-                    }
-                };
             }
             catch (Exception ex)
             {
@@ -3177,66 +3090,15 @@ namespace MultiBoardViewer
             _resizeTimer.Start();
 
             // Set focus to the selected tab's embedded window
-            RestoreFocusToCurrentTab();
+
         }
 
         private void MainWindow_Activated(object sender, EventArgs e)
         {
-            RestoreFocusToCurrentTab();
+
         }
 
-        private void RestoreFocusToCurrentTab()
-        {
-            // Use Dispatcher to ensure UI is ready
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (tabControl.SelectedItem is TabItem selectedTab && _tabProcesses.ContainsKey(selectedTab))
-                {
-                    ProcessInfo processInfo = _tabProcesses[selectedTab];
-                    if (processInfo.Process != null && !processInfo.Process.HasExited)
-                    {
-                        IntPtr handle;
 
-                        // For SumatraPDF in plugin mode, find child window of panel
-                        if (processInfo.AppType == "SumatraPDF")
-                        {
-                            handle = GetWindow(processInfo.Panel.Handle, GW_CHILD);
-                            if (handle != IntPtr.Zero)
-                            {
-                                processInfo.WindowHandle = handle;
-                            }
-                            else
-                            {
-                                handle = processInfo.WindowHandle;
-                            }
-                        }
-                        else
-                        {
-                            handle = processInfo.WindowHandle != IntPtr.Zero
-                                ? processInfo.WindowHandle
-                                : processInfo.Process.MainWindowHandle;
-                        }
-
-                        if (handle != IntPtr.Zero)
-                        {
-                            // Ensure the host is focused in WPF
-                            if (processInfo.Host != null)
-                            {
-                                processInfo.Host.Focus();
-                            }
-
-                            // Set focus to the embedded window
-                            SetFocus(handle);
-                            
-                            // Note: SetForegroundWindow is generally for top-level windows, 
-                            // but can help bring the thread to foreground if needed.
-                            // However, strictly adhering to SetFocus for child windows is usually safer 
-                            // if the parent (WPF) is already active.
-                        }
-                    }
-                }
-            }), DispatcherPriority.Input);
-        }
 
         private void ResizeTimer_Tick(object sender, EventArgs e)
         {
@@ -3553,18 +3415,7 @@ namespace MultiBoardViewer
                         }
                     };
 
-                    // Minimal focus handling
-                    panel.MouseEnter += (s, e) =>
-                    {
-                        if (!process.HasExited && processHandle != IntPtr.Zero)
-                        {
-                            try
-                            {
-                                SetFocus(processHandle);
-                            }
-                            catch { /* Ignore focus errors */ }
-                        }
-                    };
+
 
                     // Wait a bit more after embedding to ensure stability
                     await System.Threading.Tasks.Task.Delay(500);
