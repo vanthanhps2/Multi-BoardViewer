@@ -108,6 +108,7 @@ namespace MultiBoardViewer
         private const string RecentFilesFileName = "recent_files.txt";
         private string _searchFolder = ""; // Folder for file search
         private const string SearchFolderFileName = "search_folder.txt";
+        private Process _voltageDividerProcess = null; // Track calculator process
 
         // Drag and drop for tab reordering
         private bool _isDragging = false;
@@ -127,13 +128,19 @@ namespace MultiBoardViewer
         }
 
         // Check if file is already open and switch to that tab
-        private bool TrySwitchToExistingTab(string filePath)
+        private bool TrySwitchToExistingTab(string filePath, string viewerType = null)
         {
             foreach (var kvp in _tabProcesses)
             {
                 if (kvp.Value.FilePath != null &&
                     kvp.Value.FilePath.Equals(filePath, StringComparison.OrdinalIgnoreCase))
                 {
+                    // if viewerType is specified, check if it matches
+                    if (viewerType != null && !string.Equals(kvp.Value.AppType, viewerType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     // File is already open, switch to that tab
                     tabControl.SelectedItem = kvp.Key;
                     ShowStatus($"Switched to existing tab: {Path.GetFileName(filePath)}", true);
@@ -144,7 +151,7 @@ namespace MultiBoardViewer
         }
 
         // Check if a file with the same name is already open and switch to that tab
-        private bool TrySwitchToExistingTabByFileName(string filePath)
+        private bool TrySwitchToExistingTabByFileName(string filePath, string viewerType = null)
         {
             string fileName = Path.GetFileName(filePath);
             foreach (var kvp in _tabProcesses)
@@ -154,6 +161,12 @@ namespace MultiBoardViewer
                     string existingFileName = Path.GetFileName(kvp.Value.FilePath);
                     if (existingFileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
                     {
+                        // if viewerType is specified, check if it matches
+                        if (viewerType != null && !string.Equals(kvp.Value.AppType, viewerType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
                         // File with same name is already open, switch to that tab
                         tabControl.SelectedItem = kvp.Key;
                         ShowStatus($"Switched to existing tab: {fileName}", true);
@@ -605,12 +618,29 @@ namespace MultiBoardViewer
 
         private void VoltageDividerCalculator_Click(object sender, RoutedEventArgs e)
         {
-            string exePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VoltageDividerCalculator", "VoltageDividerCalculator.exe");
-            Process.Start(exePath);
+            try
+            {
+                string exePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "VoltageDividerCalculator", "VoltageDividerCalculator.exe");
+                if (File.Exists(exePath))
+                {
+                    _voltageDividerProcess = Process.Start(exePath);
+                }
+            }
+            catch { }
         }
 
         private void CreateEmptyTab()
         {
+            // First check if an empty tab already exists
+            foreach (var item in tabControl.Items)
+            {
+                if (item is TabItem tab && tab != _addTabButton && !_tabProcesses.ContainsKey(tab) && tab.Header?.ToString() == "New tab")
+                {
+                    tabControl.SelectedItem = tab;
+                    return;
+                }
+            }
+
             // Create new empty tab with 2-column layout
             TabItem newTab = new TabItem
             {
@@ -934,7 +964,8 @@ namespace MultiBoardViewer
                         {
                             if (File.Exists(capturedPath))
                             {
-                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                string viewerToCheck = capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "SumatraPDF" : "BoardViewer";
+                                if (TrySwitchToExistingTabByFileName(capturedPath, viewerToCheck))
                                     return;
 
                                 if (capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
@@ -970,10 +1001,18 @@ namespace MultiBoardViewer
                             contextMenu.PlacementTarget = fileButton;
                             contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
 
+                            MenuItem boardViewerItem = new MenuItem { Header = "Open with BoardViewer" };
+                            boardViewerItem.Click += (s, e) =>
+                            {
+                                if (TrySwitchToExistingTabByFileName(capturedPath, "BoardViewer"))
+                                    return;
+                                OpenBoardViewerInTab(newTab, capturedPath);
+                            };
+
                             MenuItem openBoardViewItem = new MenuItem { Header = "Open with OpenBoardView" };
                             openBoardViewItem.Click += (s, e) =>
                             {
-                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                if (TrySwitchToExistingTabByFileName(capturedPath, "OpenBoardView"))
                                     return;
                                 OpenOpenBoardViewInTab(newTab, capturedPath);
                             };
@@ -981,11 +1020,12 @@ namespace MultiBoardViewer
                             MenuItem flexBoardViewItem = new MenuItem { Header = "Open with FlexBoardView" };
                             flexBoardViewItem.Click += (s, e) =>
                             {
-                                if (TrySwitchToExistingTabByFileName(capturedPath))
+                                if (TrySwitchToExistingTabByFileName(capturedPath, "FlexBoardView"))
                                     return;
                                 OpenFlexBoardViewInTab(newTab, capturedPath);
                             };
 
+                            contextMenu.Items.Add(boardViewerItem);
                             contextMenu.Items.Add(openBoardViewItem);
                             contextMenu.Items.Add(flexBoardViewItem);
 
@@ -1092,8 +1132,8 @@ namespace MultiBoardViewer
                     {
                         if (File.Exists(capturedPath))
                         {
-                            // Check if file with same name is already open
-                            if (TrySwitchToExistingTabByFileName(capturedPath))
+                            string viewerToCheck = capturedPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? "SumatraPDF" : "BoardViewer";
+                            if (TrySwitchToExistingTabByFileName(capturedPath, viewerToCheck))
                             {
                                 return; // Switched to existing tab
                             }
@@ -1134,10 +1174,18 @@ namespace MultiBoardViewer
                         contextMenu.PlacementTarget = fileButton;
                         contextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint;
 
+                        MenuItem boardViewerItem = new MenuItem { Header = "Open with BoardViewer" };
+                        boardViewerItem.Click += (sender, args) =>
+                        {
+                            if (TrySwitchToExistingTabByFileName(capturedPath, "BoardViewer"))
+                                return;
+                            OpenBoardViewerInTab(newTab, capturedPath);
+                        };
+
                         MenuItem openBoardViewItem = new MenuItem { Header = "Open with OpenBoardView" };
                         openBoardViewItem.Click += (sender, args) =>
                         {
-                            if (TrySwitchToExistingTabByFileName(capturedPath))
+                            if (TrySwitchToExistingTabByFileName(capturedPath, "OpenBoardView"))
                                 return;
                             OpenOpenBoardViewInTab(newTab, capturedPath);
                         };
@@ -1145,11 +1193,12 @@ namespace MultiBoardViewer
                         MenuItem flexBoardViewItem = new MenuItem { Header = "Open with FlexBoardView" };
                         flexBoardViewItem.Click += (sender, args) =>
                         {
-                            if (TrySwitchToExistingTabByFileName(capturedPath))
+                            if (TrySwitchToExistingTabByFileName(capturedPath, "FlexBoardView"))
                                 return;
                             OpenFlexBoardViewInTab(newTab, capturedPath);
                         };
 
+                        contextMenu.Items.Add(boardViewerItem);
                         contextMenu.Items.Add(openBoardViewItem);
                         contextMenu.Items.Add(flexBoardViewItem);
 
@@ -1196,7 +1245,7 @@ namespace MultiBoardViewer
 
             TextBlock appVersion = new TextBlock
             {
-                Text = "Version 1.0.9",
+                Text = "Version 1.1.0",
                 FontSize = 12,
                 Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(100, 100, 100)),
                 Margin = new Thickness(0, 0, 0, 10)
@@ -1583,6 +1632,10 @@ namespace MultiBoardViewer
         // Open PDF in existing tab (replace content)
         private void OpenPdfInTab(TabItem tab, string pdfPath)
         {
+            // Check if file is already open
+            if (TrySwitchToExistingTab(pdfPath, "SumatraPDF"))
+                return;
+
             if (string.IsNullOrEmpty(_sumatraPdfPath) || !File.Exists(_sumatraPdfPath))
             {
                 MessageBox.Show("SumatraPDF.exe not found!\n\nPlease place SumatraPDF.exe in the SumatraPDF folder.",
@@ -1879,6 +1932,13 @@ namespace MultiBoardViewer
 
             if (result == true)
             {
+                string viewerType = null;
+                if (dialog.Result == ViewerSelectionDialog.ViewerResult.BoardViewer) viewerType = "BoardViewer";
+                else if (dialog.Result == ViewerSelectionDialog.ViewerResult.OpenBoardView) viewerType = "OpenBoardView";
+                else if (dialog.Result == ViewerSelectionDialog.ViewerResult.FlexBoardView) viewerType = "FlexBoardView";
+
+                if (viewerType != null && TrySwitchToExistingTab(filePath, viewerType))
+                    return;
                 if (dialog.Result == ViewerSelectionDialog.ViewerResult.BoardViewer)
                 {
                     OpenBoardViewerInTab(tab, filePath);
@@ -1898,7 +1958,7 @@ namespace MultiBoardViewer
         private void OpenBoardViewerWithFile(string filePath)
         {
             // Check if file is already open
-            if (TrySwitchToExistingTab(filePath))
+            if (TrySwitchToExistingTab(filePath, "BoardViewer"))
                 return;
 
             if (string.IsNullOrEmpty(_boardViewerPath) || !File.Exists(_boardViewerPath))
@@ -1977,8 +2037,10 @@ namespace MultiBoardViewer
         private void OpenBoardFileWithFile(string filePath)
         {
             // Check if file is already open
-            if (TrySwitchToExistingTab(filePath))
-                return;
+            // Do NOT check here globally as we want to allow opening same file with different viewer
+            // Logic is handled in OpenBoardFileInTab after user selects viewer
+            // if (TrySwitchToExistingTab(filePath))
+            //    return;
 
             // Create new tab
             TabItem newTab = new TabItem
@@ -2002,7 +2064,7 @@ namespace MultiBoardViewer
         private void OpenOpenBoardViewWithFile(string filePath)
         {
             // Check if file is already open
-            if (TrySwitchToExistingTab(filePath))
+            if (TrySwitchToExistingTab(filePath, "OpenBoardView"))
                 return;
 
             if (string.IsNullOrEmpty(_openBoardViewPath) || !File.Exists(_openBoardViewPath))
@@ -2080,7 +2142,7 @@ namespace MultiBoardViewer
         private async void OpenFlexBoardViewWithFile(string filePath)
         {
             // Check if file is already open
-            if (TrySwitchToExistingTab(filePath))
+            if (TrySwitchToExistingTab(filePath, "FlexBoardView"))
                 return;
 
             if (string.IsNullOrEmpty(_flexBoardViewPath) || !File.Exists(_flexBoardViewPath))
@@ -2161,7 +2223,7 @@ namespace MultiBoardViewer
         private void OpenPdfInNewTab(string pdfPath)
         {
             // Check if file is already open
-            if (TrySwitchToExistingTab(pdfPath))
+            if (TrySwitchToExistingTab(pdfPath, "SumatraPDF"))
                 return;
 
             if (string.IsNullOrEmpty(_sumatraPdfPath) || !File.Exists(_sumatraPdfPath))
@@ -3176,6 +3238,17 @@ namespace MultiBoardViewer
             });
 
             _tabProcesses.Clear();
+
+            // Close calculator if open
+            try
+            {
+                if (_voltageDividerProcess != null && !_voltageDividerProcess.HasExited)
+                {
+                    _voltageDividerProcess.Kill();
+                    _voltageDividerProcess.Dispose();
+                }
+            }
+            catch { }
 
             // Clean up any remaining temp directories
             CleanupOldTempDirectories();
