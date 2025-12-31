@@ -7,7 +7,6 @@
 ![Multi BoardViewer](./Photos/1.png)
 ![Multi BoardViewer](./Photos/2.png)
 ![Multi BoardViewer](./Photos/3.png)
-![Multi BoardViewer](./Photos/4.png)
 
 ## 🙏 Lời cảm ơn
 
